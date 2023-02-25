@@ -1,0 +1,345 @@
+; Archivo: main5.s
+; Dispositivo: PIC16F887
+; Autor: Angela Figueroa
+; Compilador: pic-a (v2.30), MPLABX V5.40
+;
+; Programa: Implementar un contador y lo guarde en
+;decimal en 3 variables, unidades,decenas,centenas.
+; Hardware: push buttons, displays
+;
+; Creado: 19 febrero, 2023
+; Última modificación: 24 febrero, 2023
+
+
+PROCESSOR 16F887
+#include <xc.inc>
+    
+  CONFIG FOSC=INTRC_NOCLKOUT	//oscilador interno
+  CONFIG WDTE=OFF   // WDT disabled (reinicio repetitivo de pic)
+  CONFIG PWRTE=OFF   // PWRT enabled (espera de 72ms al iniciar)
+  CONFIG MCLRE=OFF  // El pin de MCLR se utiliza como I/O
+  CONFIG CP=OFF    //Sin protección de código
+  CONFIG CPD=OFF   //Sin protección de datos
+  
+  CONFIG BOREN=OFF  // Sin reinicio cuando el voltaje de alimentación baja de 4V
+  CONFIG IESO=OFF   //Reinicio sin cambio de reloj de interno a externo
+  CONFIG FCMEN=OFF  //Cambio de reloj externo a interno en caso de fallo
+  CONFIG LVP=OFF	    //programación en bajo voltaje permitida
+  
+; configuration word 2
+   CONFIG WRT=OFF  //Protección de autoescritura por el programa desactivada
+   CONFIG BOR4V=BOR40V	//Reinicio abajo de 4V, (BOR21V-2.1V)
+    
+    UP	    EQU 0;ARRIBA
+    DOWN    EQU 1;ABAJO
+
+reset_tmr0 macro
+    BANKSEL	TMR0
+    movlw	6		    
+    movwf	TMR0	
+    BANKSEL	PORTA
+    endm
+
+;--------------variables---------------
+PSECT udata_bank0 ;cOLOCAMOS NUESTRAS VARIABLES	
+    unidad: DS 1	;UNIDADES
+    dece: DS 1	;DECENAS
+    cente: DS 1	;CENTENAS
+    
+    W_TEMP: DS 1
+    STATUS_TEMP: DS 1
+    
+    nibble0: DS 1
+    nibble1: DS 1
+    
+    display0: DS 1;VALOR QUE MUESTRA EN EL DISPLAY
+    display1: DS 1
+    display: DS 3
+    
+    count: DS 2
+    banderas: DS 1
+    banderasd: DS 1
+    cont1: DS 1 ;VALOR QUE SE MANIPULA
+    alarm: DS 1 ;ALARMA PARA LOS DISPLAYS
+    resu: DS 2
+    
+    
+PSECT resVect, class=CODE, abs, delta=2
+;-----------vector reset--------------
+ORG 00h     ;posicion 0000h para el reset
+resetVec:
+    PAGESEL main
+    goto main
+
+PSECT intVect, class=CODE, abs, delta=2
+;-----------vector interrupt--------------
+ORG 04h     ;posicion 0004h para las interrupciones
+    
+push:	;GUARDAMOS STATUS Y W		
+    movwf	W_TEMP
+    swapf	STATUS, W
+    movwf	STATUS_TEMP
+	
+isr:	;RUTINAS DE INTERRUPCION		
+    btfsc	RBIF	;BANDERA DE CAMBIO (PORTB)	
+    call	int_iocb	
+    btfsc	T0IF	;BANDERA DE CAMBIO (TMR0)	
+    call	T0_int
+	
+pop:			;REGRESAN LOS VALORES DE STATUS Y W
+    swapf	STATUS_TEMP, W
+    movwf	STATUS
+    swapf	W_TEMP, F
+    swapf	W_TEMP, W
+    retfie
+	
+	
+    int_iocb:			;subrutina de interrupcion portb
+	btfss	PORTB, 0	;incrementa el contador
+	incf	PORTA	
+	btfss	PORTB, 1	;decrementa el contador
+	decf	PORTA
+	bcf	RBIF		; reset
+	return
+	
+    T0_int:			; subrutina de interrupcion tmr0
+	reset_tmr0
+	bcf	T0IF		; reset
+	bsf	alarm, 0
+	call imprimir_dec
+   
+	
+PSECT code, delta=2, abs
+ORG 100h    ; posicion para el codigo
+tabla_7seg:
+    clrf    PCLATH
+    bsf	    PCLATH, 0
+    andlw   00001111B
+    addwf   PCL		    
+    retlw   11000000B	    ; 0	    
+    retlw   11111001B	    ; 1	   
+    retlw   10100100B	    ; 2	    
+    retlw   10110000B	    ; 3	    
+    retlw   10011001B	    ; 4	    
+    retlw   10010010B	    ; 5	    
+    retlw   10000010B	    ; 6
+    retlw   11111000B	    ; 7
+    retlw   10000000B	    ; 8
+    retlw   10011000B	    ; 9
+    retlw   10001000B	    ; A
+    retlw   10000011B	    ; b
+    retlw   11000110B	    ; c
+    retlw   10100001B	    ; d
+    retlw   10000110B	    ; E
+    retlw   10001110B	    ; F
+    return
+	
+main:
+    BANKSEL ANSEL
+    clrf    ANSEL ; utilizan pines digitales
+    clrf    ANSELH
+
+    BANKSEL TRISA
+    clrf	TRISA		; PORTA Salida
+	
+    clrf	TRISB
+    bsf		TRISB, UP
+    bsf		TRISB, DOWN	; PORTB entrada
+    clrf	TRISC		; 
+    clrf	TRISD
+	
+    BANKSEL	OPTION_REG	; pullup PORTB
+    bcf		OPTION_REG, 7
+	
+    BANKSEL	WPUB		;Pullup
+    clrf	WPUB
+    bsf		WPUB, UP	
+    bsf		WPUB, DOWN
+	
+    BANKSEL	IOCB		; Interrupciones
+    clrf	IOCB
+    bsf		IOCB, UP	
+    bsf		IOCB, DOWN
+	
+    BANKSEL	PORTA	
+    clrf	PORTA
+    movlw	10000001B
+    movwf	PORTC
+    clrf	PORTD
+	
+    clrf	unidad
+    clrf	dece
+    clrf	cente
+    clrf	count
+    clrf	alarm
+    clrf	banderasd
+	
+    call config_tmr0
+    call config_reloj
+    call config_int
+    BANKSEL	PORTA	
+	
+	
+;------------------loop principal---------------	
+loop:			
+    call	val_decimal
+    call	cente_sub
+    goto	loop
+    
+;RELOJ
+config_reloj:
+    BANKSEL	OSCCON
+    bsf		OSCCON, 6	; 2Mhz
+    bcf		OSCCON, 5
+    bcf		OSCCON, 4
+    bsf		OSCCON, 0	;INTERNAL OSCILLATOR
+    return
+	
+config_tmr0:
+    BANKSEL	OPTION_REG
+    bcf		OPTION_REG, 5	; 8-bit Timer Mode
+    bcf		OPTION_REG, 3	; PRESCALER ASIGNADO A TMR0
+    bcf		OPTION_REG, 2	; TMR0 RATE 1:8
+    bsf		OPTION_REG, 1
+    bcf		OPTION_REG, 0
+    reset_tmr0 
+    return	
+	
+config_int:
+    BANKSEL	INTCON
+    bsf		INTCON, 7 
+    bsf		INTCON, 3 
+    bcf		INTCON, 0 
+    bsf		INTCON, 5 
+    return
+   
+display_var:
+    clrf    PORTD
+    btfsc   banderas,  0
+    ;goto    display_1
+	
+;display_0:
+    ;movf    display0, W
+    ;movwf   PORTC
+    ;bsf     PORTD,  0
+    ;goto    toggle_b0
+    
+;display_1:
+    ;movf    display1, W
+    ;movwf   PORTC
+    ;bsf     PORTD,  1
+
+val_decimal: 
+    movf    unidad, W;UNIDAD
+    call    tabla_7seg
+    movwf   display
+    ;
+    movf    dece, W;DECENAS
+    call    tabla_7seg
+    movwf   display+1
+    ;
+    movf    cente, W;CENTENAS
+    call    tabla_7seg
+    movwf   display+2
+    
+imprimir_dec:;LO IMPRIMIMOS EN EL DISPLAY
+    bcf PORTD, 0
+    bcf PORTD, 1
+    bcf PORTD, 2
+    ;
+    btfsc   banderasd, 0
+    goto    display_4
+    ;
+    btfsc   banderasd, 1
+    goto    display_3
+    ;
+    btfsc   banderasd, 2
+    goto    display_2
+      
+display_2:;DISPLAY 1
+    movf    display, W
+    movwf   PORTC
+    bsf	    PORTD, 2 
+    bcf	    banderasd, 2
+    bsf	    banderasd, 1
+    return
+    
+display_3:;DISPLAY 2
+    movf    display+1, W
+    movwf   PORTC
+    bsf	    PORTD, 1
+    bcf	    banderasd, 1
+    bsf	    banderasd, 0
+    return 
+    
+display_4:;DISPLAY 3
+    movf    display+2, W
+    movwf   PORTC
+    bsf	    PORTD, 0
+    bcf	    banderasd, 0
+    bsf	    banderasd, 2
+    
+cente_sub:;CONVERTIMOS LOS VALORES A CENTENAS
+    clrf    unidad
+    clrf    dece
+    clrf    cente
+    movf    PORTA, W
+    movwf   cont1
+    movlw   100
+    subwf   cont1, F
+    incf    cente
+    btfsc   STATUS, 0
+    goto    $-4
+    decf    cente
+    movlw   100
+    addwf   cont1, F
+    call    decenas_sub
+    return
+    
+decenas_sub:;CONVERTIMOS LOS VALORES A DECENAS
+    movlw   10
+    subwf   cont1, F
+    incf    dece
+    btfsc   STATUS, 0
+    goto    $-4
+    decf    dece
+    movlw   10
+    addwf   cont1, F
+    call    unidad_sub
+    return
+    
+unidad_sub:;CONVERTIMOS LOS VALORES A UNIDADES
+    movlw   1
+    subwf   cont1, F
+    incf    unidad
+    btfsc   STATUS, 0
+    goto    $-4
+    decf    unidad
+    movlw   1
+    addwf   cont1, F
+    return
+
+toggle_b0:    ;TOGGLE
+    comf    banderas, F
+    bcf	    alarm, 0
+    return
+	
+separar_nibbles:;SEPARAMOS LO NIBBLES
+    movf    count, W
+    andlw   00001111B
+    movwf   nibble0
+    swapf   count, W
+    andlw   00001111B
+    movwf   nibble1
+    return
+	
+preparar_displays:;PREPARAMOS LOS DISPLAYS
+    movf    nibble0, W
+    call    tabla_7seg
+    movwf   display0
+    movf    nibble1, W
+    call    tabla_7seg
+    movwf   display1
+    return
+
+END
